@@ -1,7 +1,7 @@
 # kv
 
 ```
-import kv "github.com/Gandalfalex/inmemory_db"
+import kv "github.com/Gandalfalex/in_memory_db"
 ```
 
 An embedded, single-process key-value store built for hosts with very

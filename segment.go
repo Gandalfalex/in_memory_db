@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Gandalfalex/inmemory_db/internal/mmapfile"
+	"github.com/Gandalfalex/in_memory_db/internal/mmapfile"
 )
 
 // cachePageSizeBytes is used to size/index each segment's residency

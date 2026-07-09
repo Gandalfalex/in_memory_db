@@ -7,7 +7,7 @@ import (
 	"log"
 	"os"
 
-	kv "github.com/Gandalfalex/inmemory_db"
+	kv "github.com/Gandalfalex/in_memory_db"
 )
 
 func main() {

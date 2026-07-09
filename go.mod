@@ -1,3 +1,3 @@
-module github.com/Gandalfalex/inmemory_db
+module github.com/Gandalfalex/in_memory_db
 
 go 1.26
