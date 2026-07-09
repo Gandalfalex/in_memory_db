@@ -1,0 +1,5 @@
+*.test
+/example/example
+*.db
+*.seg
+index.snapshot
