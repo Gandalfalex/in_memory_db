@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"math"
+	"sort"
 	"time"
 )
 
@@ -125,11 +126,15 @@ func (db *DB) Delete(key []byte) error {
 type IterOptions struct {
 	// Prefix, if non-empty, restricts iteration to keys with this prefix.
 	Prefix []byte
-	// Reverse iterates matched keys in reverse of their (arbitrary,
-	// hash-order) snapshot order. Since the index is a hash table, not a
-	// sorted structure, "reverse" only means "the other direction through
-	// an unordered snapshot" — there is no lexicographic ordering
-	// guarantee either direction.
+	// Sorted, if true, orders matched keys lexicographically (bytes.Compare)
+	// before iterating, instead of the index's arbitrary hash-bucket order.
+	// The key list is already fully materialized at Iterator creation time
+	// regardless (see Iterator's doc comment below), so this only adds an
+	// O(n log n) sort — no additional memory cost.
+	Sorted bool
+	// Reverse iterates matched keys in the opposite direction: lexicographic
+	// descending if Sorted is set, otherwise just "the other way through an
+	// arbitrary hash-order snapshot" (no ordering meaning on its own).
 	Reverse bool
 }
 
@@ -162,6 +167,9 @@ func (db *DB) Iterator(opts IterOptions) *Iterator {
 	})
 	db.mu.RUnlock()
 
+	if opts.Sorted {
+		sort.Slice(keys, func(i, j int) bool { return bytes.Compare(keys[i], keys[j]) < 0 })
+	}
 	if opts.Reverse {
 		for i, j := 0, len(keys)-1; i < j; i, j = i+1, j-1 {
 			keys[i], keys[j] = keys[j], keys[i]
