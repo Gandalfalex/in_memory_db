@@ -69,8 +69,8 @@ func TestIndexDeleteThenReinsert(t *testing.T) {
 func TestIndexResizeCorrectness(t *testing.T) {
 	idx := newIndex()
 	const n = 20000 // several rehashes past initialSlotCapacity=1024
-	for i := 0; i < n; i++ {
-		key := []byte(fmt.Sprintf("key-%d", i))
+	for i := range n {
+		key := fmt.Appendf(nil, "key-%d", i)
 		loc := location{uint32(i), uint32(i * 7), uint32(i % 50)}
 		if _, hadPrev := idx.put(key, loc); hadPrev {
 			t.Fatalf("put %d: expected new key", i)
@@ -79,8 +79,8 @@ func TestIndexResizeCorrectness(t *testing.T) {
 	if idx.len() != n {
 		t.Fatalf("expected %d live entries, got %d", n, idx.len())
 	}
-	for i := 0; i < n; i++ {
-		key := []byte(fmt.Sprintf("key-%d", i))
+	for i := range n {
+		key := fmt.Appendf(nil, "key-%d", i)
 		loc, found := idx.get(key)
 		if !found {
 			t.Fatalf("key %d missing after resize", i)
@@ -96,13 +96,13 @@ func TestIndexDeleteHeavyCompaction(t *testing.T) {
 	idx := newIndex()
 	const n = 5000
 	keys := make([][]byte, n)
-	for i := 0; i < n; i++ {
-		keys[i] = []byte(fmt.Sprintf("dk-%d", i))
+	for i := range n {
+		keys[i] = fmt.Appendf(nil, "dk-%d", i)
 		idx.put(keys[i], location{1, uint32(i), 1})
 	}
 	// Delete 90% of keys, forcing tombstone-heavy occupancy and exercising
 	// the same-size rehash-to-compact path (not just grow-on-load).
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i%10 != 0 {
 			idx.delete(keys[i])
 		}
@@ -112,18 +112,18 @@ func TestIndexDeleteHeavyCompaction(t *testing.T) {
 	}
 	// Insert enough new keys to force rehashing through the tombstone-heavy
 	// table and confirm nothing is lost or misplaced.
-	for i := 0; i < n; i++ {
-		idx.put([]byte(fmt.Sprintf("new-%d", i)), location{2, uint32(i), 2})
+	for i := range n {
+		idx.put(fmt.Appendf(nil, "new-%d", i), location{2, uint32(i), 2})
 	}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i%10 == 0 {
 			if _, found := idx.get(keys[i]); !found {
 				t.Fatalf("survivor key %d lost after compaction/rehash", i)
 			}
 		}
 	}
-	for i := 0; i < n; i++ {
-		if _, found := idx.get([]byte(fmt.Sprintf("new-%d", i))); !found {
+	for i := range n {
+		if _, found := idx.get(fmt.Appendf(nil, "new-%d", i)); !found {
 			t.Fatalf("new key %d missing", i)
 		}
 	}
@@ -137,7 +137,7 @@ func TestArenaChunkBoundary(t *testing.T) {
 		key   string
 	}
 	var locs []loc
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		k := fmt.Sprintf("arena-key-%03d", i)
 		c, o := a.put([]byte(k))
 		locs = append(locs, loc{c, o, k})
@@ -174,7 +174,7 @@ func TestIndexRandomizedFuzz(t *testing.T) {
 	idx := newIndex()
 	model := map[string]location{}
 	r := rand.New(rand.NewSource(42))
-	for i := 0; i < 50000; i++ {
+	for range 50000 {
 		key := fmt.Sprintf("fk-%d", r.Intn(3000))
 		switch r.Intn(3) {
 		case 0, 1: // put weighted higher than delete

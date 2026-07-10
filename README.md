@@ -22,16 +22,31 @@ defer db.Close()
 db.Put([]byte("user:1"), []byte("alice"))
 v, err := db.Get([]byte("user:1"))
 
-it := db.Iterator(kv.IterOptions{Prefix: []byte("user:")})
+// range-over-func iteration (read errors end the loop silently):
+for k, v := range db.All(kv.IterOptions{Prefix: []byte("user:")}) {
+    fmt.Println(string(k), string(v))
+}
+
+// explicit Iterator when errors must be distinguished from exhaustion:
+it := db.Iterator(kv.IterOptions{Prefix: []byte("user:"), Sorted: true})
 defer it.Close()
 for it.Next() {
     fmt.Println(string(it.Key()), string(it.Value()))
+}
+if err := it.Err(); err != nil {
+    log.Fatal(err)
 }
 
 db.Delete([]byte("user:1"))
 ```
 
-For typed values, wrap the raw `[]byte` API in a `Bucket`:
+Lookups return `kv.ErrNotFound` for absent keys; invalid keys return
+`kv.ErrEmptyKey` or `kv.ErrKeyTooLarge` (keys are capped at
+`kv.MaxKeyLen` = 65535 bytes). All are `errors.Is`-comparable.
+
+For typed values, wrap the raw `[]byte` API in a `Bucket`. End the bucket
+prefix with a delimiter (it is prepended verbatim, so `"user"` would also
+match a `"users:"` bucket's keys):
 
 ```go
 type User struct{ Name string; Age int }
@@ -39,6 +54,19 @@ type User struct{ Name string; Age int }
 users := kv.NewBucket[User](db, "users:", kv.JSONCodec[User]{})
 users.Put("alice", User{Name: "Alice", Age: 30})
 u, err := users.Get("alice")
+
+// typed iteration: keys come back prefix-stripped, values decoded
+for name, u := range users.All("") {
+    fmt.Println(name, u.Age)
+}
+```
+
+Maintenance and introspection:
+
+```go
+db.Sync()    // fsync the active segment (when SyncOnWrite is off)
+db.Compact() // run compaction now instead of waiting for the 30s ticker
+s := db.Stats() // Keys, Segments, DeadBytes, LastCompactionErr
 ```
 
 See `example/` for a complete runnable program.
@@ -120,8 +148,11 @@ one. Writes are atomic per key, not across multiple keys — there is no
 multi-key transaction support. Prefix iteration snapshots the set of
 matching *keys* at creation time (not their values), so its memory cost
 scales with the number of matched keys; the index is a hash table, not a
-sorted structure, so iteration order (and "reverse") has no lexicographic
-meaning. Keys are capped at 65535 bytes.
+sorted structure, so default iteration order (and "reverse") has no
+lexicographic meaning. `IterOptions.Sorted` gives lexicographic order by
+sorting the already-materialized key snapshot at iterator creation
+(O(n log n), no extra memory). Keys are capped at `MaxKeyLen`
+(65535 bytes).
 
 The mmap-backed implementation targets unix platforms (darwin, linux,
 etc.) via `syscall.Mmap`. A pure-file-I/O fallback exists for other

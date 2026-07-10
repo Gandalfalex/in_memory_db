@@ -20,10 +20,8 @@ func newArena(chunkSize int) *arena {
 // put copies key into the arena and returns its location.
 func (a *arena) put(key []byte) (chunkIdx uint16, offset uint32) {
 	if len(a.chunks) == 0 || a.used+len(key) > len(a.chunks[len(a.chunks)-1]) {
-		size := a.chunkSize
-		if len(key) > size {
-			size = len(key) // oversized key gets a dedicated, exactly-sized chunk
-		}
+		// an oversized key gets a dedicated, exactly-sized chunk
+		size := max(len(key), a.chunkSize)
 		a.chunks = append(a.chunks, make([]byte, size))
 		a.used = 0
 	}

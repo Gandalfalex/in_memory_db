@@ -94,7 +94,7 @@ func TestSegmentRotation(t *testing.T) {
 
 	const n = 2000
 	val := make([]byte, 50)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		key := fmt.Sprintf("key-%05d", i)
 		if err := db.Put([]byte(key), val); err != nil {
 			t.Fatalf("put %d: %v", i, err)
@@ -106,7 +106,7 @@ func TestSegmentRotation(t *testing.T) {
 	if numSegments < 2 {
 		t.Fatalf("expected rotation to produce multiple segments, got %d", numSegments)
 	}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		key := fmt.Sprintf("key-%05d", i)
 		got, err := db.Get([]byte(key))
 		if err != nil {
@@ -128,9 +128,9 @@ func TestCloseReopenRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	const n = 1000
-	for i := 0; i < n; i++ {
+	for i := range n {
 		key := fmt.Sprintf("k-%04d", i)
-		db.Put([]byte(key), []byte(fmt.Sprintf("v-%04d", i)))
+		db.Put([]byte(key), fmt.Appendf(nil, "v-%04d", i))
 	}
 	db.Delete([]byte("k-0005"))
 	if err := db.Close(); err != nil {
@@ -142,7 +142,7 @@ func TestCloseReopenRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db2.Close()
-	for i := 0; i < n; i++ {
+	for i := range n {
 		key := fmt.Sprintf("k-%04d", i)
 		if key == "k-0005" {
 			if _, err := db2.Get([]byte(key)); err != ErrNotFound {
@@ -171,8 +171,8 @@ func TestCloseReopenWithSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 500; i++ {
-		db.Put([]byte(fmt.Sprintf("s-%04d", i)), []byte("value"))
+	for i := range 500 {
+		db.Put(fmt.Appendf(nil, "s-%04d", i), []byte("value"))
 	}
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
@@ -186,7 +186,7 @@ func TestCloseReopenWithSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db2.Close()
-	for i := 0; i < 500; i++ {
+	for i := range 500 {
 		key := fmt.Sprintf("s-%04d", i)
 		got, err := db2.Get([]byte(key))
 		if err != nil || string(got) != "value" {
@@ -210,13 +210,13 @@ func TestCompactionReclaimsAndPreservesData(t *testing.T) {
 	// Fill several segments, then overwrite most keys repeatedly to build
 	// garbage in the earlier segments.
 	const n = 300
-	for i := 0; i < n; i++ {
-		db.Put([]byte(fmt.Sprintf("c-%04d", i)), []byte("v1-------------"))
+	for i := range n {
+		db.Put(fmt.Appendf(nil, "c-%04d", i), []byte("v1-------------"))
 	}
-	for round := 0; round < 5; round++ {
-		for i := 0; i < n; i++ {
+	for round := range 5 {
+		for i := range n {
 			if i%3 != 0 {
-				db.Put([]byte(fmt.Sprintf("c-%04d", i)), []byte(fmt.Sprintf("v%d-------------", round)))
+				db.Put(fmt.Appendf(nil, "c-%04d", i), fmt.Appendf(nil, "v%d-------------", round))
 			}
 		}
 	}
@@ -234,7 +234,7 @@ func TestCompactionReclaimsAndPreservesData(t *testing.T) {
 		t.Fatalf("expected compaction to reduce segment count: before=%d after=%d", segsBefore, segsAfter)
 	}
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		key := fmt.Sprintf("c-%04d", i)
 		got, err := db.Get([]byte(key))
 		if err != nil {

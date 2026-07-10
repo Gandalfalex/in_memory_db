@@ -2,21 +2,25 @@ package kv
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"iter"
 	"math"
-	"sort"
+	"slices"
 	"time"
 )
 
-const maxKeyLen = math.MaxUint16 // indexSlot.keyLen is a uint16
+// MaxKeyLen is the largest key size Put accepts, in bytes (the index
+// stores key lengths as uint16).
+const MaxKeyLen = math.MaxUint16
 
 // Put inserts or overwrites key's value.
 func (db *DB) Put(key, value []byte) error {
 	if len(key) == 0 {
-		return fmt.Errorf("kv: key must not be empty")
+		return ErrEmptyKey
 	}
-	if len(key) > maxKeyLen {
-		return fmt.Errorf("kv: key of %d bytes exceeds max length %d", len(key), maxKeyLen)
+	if len(key) > MaxKeyLen {
+		return fmt.Errorf("%w: %d bytes > %d", ErrKeyTooLarge, len(key), MaxKeyLen)
 	}
 	record := encodeRecord(key, value, false, time.Now().UnixNano())
 
@@ -48,6 +52,9 @@ func (db *DB) Put(key, value []byte) error {
 
 // Get returns a copy of key's current value, or ErrNotFound.
 func (db *DB) Get(key []byte) ([]byte, error) {
+	if len(key) == 0 {
+		return nil, ErrEmptyKey
+	}
 	db.mu.RLock()
 	defer db.mu.RUnlock()
 	if db.closed {
@@ -80,6 +87,9 @@ func (db *DB) getLocked(key []byte) ([]byte, error) {
 
 // Has reports whether key currently has a live value.
 func (db *DB) Has(key []byte) (bool, error) {
+	if len(key) == 0 {
+		return false, ErrEmptyKey
+	}
 	db.mu.RLock()
 	defer db.mu.RUnlock()
 	if db.closed {
@@ -92,7 +102,10 @@ func (db *DB) Has(key []byte) (bool, error) {
 // Delete removes key. Deleting an absent key is not an error.
 func (db *DB) Delete(key []byte) error {
 	if len(key) == 0 {
-		return fmt.Errorf("kv: key must not be empty")
+		return ErrEmptyKey
+	}
+	if len(key) > MaxKeyLen {
+		return fmt.Errorf("%w: %d bytes > %d", ErrKeyTooLarge, len(key), MaxKeyLen)
 	}
 	record := encodeRecord(key, nil, true, time.Now().UnixNano())
 
@@ -151,6 +164,7 @@ type Iterator struct {
 	pos    int
 	curKey []byte
 	curVal []byte
+	err    error
 	closed bool
 }
 
@@ -168,7 +182,7 @@ func (db *DB) Iterator(opts IterOptions) *Iterator {
 	db.mu.RUnlock()
 
 	if opts.Sorted {
-		sort.Slice(keys, func(i, j int) bool { return bytes.Compare(keys[i], keys[j]) < 0 })
+		slices.SortFunc(keys, bytes.Compare)
 	}
 	if opts.Reverse {
 		for i, j := 0, len(keys)-1; i < j; i, j = i+1, j-1 {
@@ -180,9 +194,9 @@ func (db *DB) Iterator(opts IterOptions) *Iterator {
 
 // Next advances to the next matching key, skipping any that were deleted
 // or already garbage-collected since the iterator was created. It returns
-// false once exhausted.
+// false once exhausted or on a read error; check Err to distinguish.
 func (it *Iterator) Next() bool {
-	if it.closed {
+	if it.closed || it.err != nil {
 		return false
 	}
 	for it.pos++; it.pos < len(it.keys); it.pos++ {
@@ -190,9 +204,15 @@ func (it *Iterator) Next() bool {
 		it.db.mu.RLock()
 		val, err := it.db.getLocked(key)
 		it.db.mu.RUnlock()
-		if err == nil {
+		switch {
+		case err == nil:
 			it.curKey, it.curVal = key, val
 			return true
+		case errors.Is(err, ErrNotFound):
+			// deleted since the key snapshot was taken; skip
+		default:
+			it.err = err
+			return false
 		}
 	}
 	return false
@@ -201,6 +221,10 @@ func (it *Iterator) Next() bool {
 func (it *Iterator) Key() []byte   { return it.curKey }
 func (it *Iterator) Value() []byte { return it.curVal }
 
+// Err returns the first read error encountered by Next, if any. A nil Err
+// after Next returns false means the iterator is simply exhausted.
+func (it *Iterator) Err() error { return it.err }
+
 // Close releases the iterator's snapshot. Safe to call multiple times.
 func (it *Iterator) Close() error {
 	it.closed = true
@@ -208,4 +232,20 @@ func (it *Iterator) Close() error {
 	it.curKey = nil
 	it.curVal = nil
 	return nil
+}
+
+// All returns an iterator over key/value pairs matching opts, for use
+// with range-over-func. A read error silently ends the iteration early;
+// use Iterator directly when errors must be distinguished from
+// exhaustion.
+func (db *DB) All(opts IterOptions) iter.Seq2[[]byte, []byte] {
+	return func(yield func([]byte, []byte) bool) {
+		it := db.Iterator(opts)
+		defer it.Close()
+		for it.Next() {
+			if !yield(it.Key(), it.Value()) {
+				return
+			}
+		}
+	}
 }

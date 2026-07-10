@@ -195,8 +195,8 @@ func loadSnapshotInto(dir string, idx *index) (watermarkSegID uint32, watermarkS
 		return 0, 0, err
 	}
 
-	keyBuf := make([]byte, maxKeyLen)
-	for i := uint64(0); i < count; i++ {
+	keyBuf := make([]byte, MaxKeyLen)
+	for range count {
 		keyLen, err := readUint16(r)
 		if err != nil {
 			return 0, 0, err

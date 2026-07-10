@@ -27,7 +27,7 @@ func BenchmarkPut(b *testing.B) {
 	val := make([]byte, 100)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if err := db.Put([]byte(fmt.Sprintf("key-%d", i)), val); err != nil {
+		if err := db.Put(fmt.Appendf(nil, "key-%d", i), val); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -38,8 +38,8 @@ func BenchmarkGet(b *testing.B) {
 	val := make([]byte, 100)
 	const preload = 100000
 	keys := make([][]byte, preload)
-	for i := 0; i < preload; i++ {
-		keys[i] = []byte(fmt.Sprintf("key-%d", i))
+	for i := range preload {
+		keys[i] = fmt.Appendf(nil, "key-%d", i)
 		if err := db.Put(keys[i], val); err != nil {
 			b.Fatal(err)
 		}
@@ -56,8 +56,8 @@ func BenchmarkPrefixScan(b *testing.B) {
 	db := openBenchDB(b)
 	val := make([]byte, 100)
 	const preload = 20000
-	for i := 0; i < preload; i++ {
-		if err := db.Put([]byte(fmt.Sprintf("scan-%06d", i)), val); err != nil {
+	for i := range preload {
+		if err := db.Put(fmt.Appendf(nil, "scan-%06d", i), val); err != nil {
 			b.Fatal(err)
 		}
 	}

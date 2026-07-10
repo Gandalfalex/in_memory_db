@@ -12,4 +12,9 @@ var (
 	// ErrCorrupt is returned when recovery encounters data it cannot trust
 	// (e.g. a malformed index snapshot) and no safe fallback applies.
 	ErrCorrupt = errors.New("kv: corrupt data")
+	// ErrEmptyKey is returned by Put/Get/Has/Delete when key is empty.
+	ErrEmptyKey = errors.New("kv: key must not be empty")
+	// ErrKeyTooLarge is returned (wrapped, with the offending size) by
+	// Put/Delete when key exceeds MaxKeyLen. Test with errors.Is.
+	ErrKeyTooLarge = errors.New("kv: key exceeds max length")
 )

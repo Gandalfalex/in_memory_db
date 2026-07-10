@@ -48,10 +48,7 @@ const residentCleanupInterval = 60 * time.Second
 func (s *segment) ensureResidentBits() {
 	s.residentBitsSet.Do(func() {
 		pages := (s.capacity + cachePageSizeBytes - 1) / cachePageSizeBytes
-		words := (pages + 63) / 64
-		if words < 1 {
-			words = 1
-		}
+		words := max((pages+63)/64, 1)
 		s.residentBits = make([]atomic.Uint64, words)
 		s.nextCleanup.Store(time.Now().Add(residentCleanupInterval).Unix())
 	})

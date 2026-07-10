@@ -32,23 +32,45 @@ func (db *DB) compactionLoop() {
 		case <-db.compactorStop:
 			return
 		case <-ticker.C:
-			db.compactNow()
+			db.recordCompactionErr(db.compactNow())
 		}
 	}
 }
 
+// Compact synchronously runs compaction passes until no segment remains
+// above CompactionRatio, without waiting for the background ticker.
+func (db *DB) Compact() error {
+	db.mu.RLock()
+	closed := db.closed
+	db.mu.RUnlock()
+	if closed {
+		return ErrClosed
+	}
+	err := db.compactNow()
+	db.recordCompactionErr(err)
+	return err
+}
+
+// recordCompactionErr publishes the outcome of a compaction pass for
+// Stats.LastCompactionErr; a nil err clears any earlier failure.
+func (db *DB) recordCompactionErr(err error) {
+	db.mu.Lock()
+	db.compactErr = err
+	db.mu.Unlock()
+}
+
 // compactNow runs compaction passes until no segment remains above the
-// configured dead-byte ratio. Exported to the package only (used by the
-// background ticker, and directly by tests that need deterministic
-// compaction without waiting on the timer).
-func (db *DB) compactNow() {
+// configured dead-byte ratio. Used by the background ticker, by Compact,
+// and directly by tests that need deterministic compaction without
+// waiting on the timer.
+func (db *DB) compactNow() error {
 	for {
 		id, ok := db.pickCompactionCandidate()
 		if !ok {
-			return
+			return nil
 		}
 		if err := db.compactSegment(id); err != nil {
-			return
+			return err
 		}
 	}
 }

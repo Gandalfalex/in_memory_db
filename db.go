@@ -3,7 +3,7 @@ package kv
 import (
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +22,7 @@ type DB struct {
 	compactOut *segment // current write target for compaction relocations, see compaction.go
 	nextSegID  uint32
 	deadBytes  map[uint32]int64 // segID -> bytes made garbage by later overwrites/deletes, read by compaction.go
+	compactErr error            // outcome of the most recent compaction pass, surfaced via Stats
 	closed     bool
 
 	compactorStop chan struct{}
@@ -34,6 +35,9 @@ func Open(opts Options) (*DB, error) {
 	opts = opts.withDefaults()
 	if opts.Dir == "" {
 		return nil, fmt.Errorf("kv: Options.Dir is required")
+	}
+	if opts.CompactionRatio > 1 {
+		return nil, fmt.Errorf("kv: Options.CompactionRatio %v out of range (0, 1]", opts.CompactionRatio)
 	}
 	if err := os.MkdirAll(opts.Dir, 0o755); err != nil {
 		return nil, fmt.Errorf("kv: create dir: %w", err)
@@ -85,6 +89,46 @@ func (db *DB) Close() error {
 	return nil
 }
 
+// Sync fsyncs the active segment, making every previously written record
+// durable. Only useful when SyncOnWrite is off (with it on, every
+// Put/Delete already syncs).
+func (db *DB) Sync() error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	if db.closed {
+		return ErrClosed
+	}
+	return db.active.sync()
+}
+
+// Stats is a point-in-time snapshot of the DB's size counters.
+type Stats struct {
+	// Keys is the number of live keys.
+	Keys int
+	// Segments is the number of open segment files, including the active
+	// write segment and any compaction output segment.
+	Segments int
+	// DeadBytes is the total bytes superseded by later overwrites or
+	// deletes, reclaimable by compaction.
+	DeadBytes int64
+	// LastCompactionErr is the error from the most recent compaction
+	// pass (background or explicit Compact), nil if it succeeded. The
+	// background compactor retries every tick, so a persistent non-nil
+	// value here means dead bytes are accumulating unreclaimed.
+	LastCompactionErr error
+}
+
+// Stats returns current size counters. Cheap: one read lock, no I/O.
+func (db *DB) Stats() Stats {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+	s := Stats{Keys: db.idx.len(), Segments: len(db.segments), LastCompactionErr: db.compactErr}
+	for _, n := range db.deadBytes {
+		s.DeadBytes += n
+	}
+	return s
+}
+
 // ensureCapacity rotates to a fresh active segment if a record of
 // recordLen bytes wouldn't fit in the current one. Caller must hold db.mu.
 func (db *DB) ensureCapacity(recordLen int64) error {
@@ -134,6 +178,6 @@ func listSegmentIDs(dir string) ([]uint32, error) {
 		}
 		ids = append(ids, uint32(id))
 	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	slices.Sort(ids)
 	return ids, nil
 }

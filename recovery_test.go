@@ -30,8 +30,8 @@ func TestRecoveryWithoutCleanClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	const n = 500
-	for i := 0; i < n; i++ {
-		if err := db.Put([]byte(fmt.Sprintf("r-%04d", i)), []byte("value")); err != nil {
+	for i := range n {
+		if err := db.Put(fmt.Appendf(nil, "r-%04d", i), []byte("value")); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -46,7 +46,7 @@ func TestRecoveryWithoutCleanClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db2.Close()
-	for i := 0; i < n; i++ {
+	for i := range n {
 		key := fmt.Sprintf("r-%04d", i)
 		got, err := db2.Get([]byte(key))
 		if err != nil || string(got) != "value" {
@@ -65,8 +65,8 @@ func TestRecoveryTornTail(t *testing.T) {
 		t.Fatal(err)
 	}
 	const n = 20
-	for i := 0; i < n; i++ {
-		if err := db.Put([]byte(fmt.Sprintf("t-%02d", i)), []byte("committed-value")); err != nil {
+	for i := range n {
+		if err := db.Put(fmt.Appendf(nil, "t-%02d", i), []byte("committed-value")); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -97,7 +97,7 @@ func TestRecoveryTornTail(t *testing.T) {
 	}
 	defer db2.Close()
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		key := fmt.Sprintf("t-%02d", i)
 		got, err := db2.Get([]byte(key))
 		if err != nil || string(got) != "committed-value" {
@@ -124,8 +124,8 @@ func TestRecoveryCorruptRecordTruncatesLog(t *testing.T) {
 		t.Fatal(err)
 	}
 	const n = 10
-	for i := 0; i < n; i++ {
-		if err := db.Put([]byte(fmt.Sprintf("g-%02d", i)), []byte("good")); err != nil {
+	for i := range n {
+		if err := db.Put(fmt.Appendf(nil, "g-%02d", i), []byte("good")); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -149,7 +149,7 @@ func TestRecoveryCorruptRecordTruncatesLog(t *testing.T) {
 	}
 	defer db2.Close()
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		key := fmt.Sprintf("g-%02d", i)
 		if _, err := db2.Get([]byte(key)); err != ErrNotFound {
 			t.Fatalf("expected key %q to be dropped after corruption truncation, err=%v", key, err)
