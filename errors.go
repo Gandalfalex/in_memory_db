@@ -17,4 +17,11 @@ var (
 	// ErrKeyTooLarge is returned (wrapped, with the offending size) by
 	// Put/Delete when key exceeds MaxKeyLen. Test with errors.Is.
 	ErrKeyTooLarge = errors.New("kv: key exceeds max length")
+	// ErrNoLineKey is returned by FileIndex.Put when the KeyFunc extracts
+	// no key from the line — such a line could never be recovered into the
+	// index on reopen, so refusing it keeps the file and index consistent.
+	ErrNoLineKey = errors.New("kv: keyFunc extracted no key from line")
+	// ErrInvalidLine is returned by FileIndex.Put when the line contains a
+	// newline byte (a record is exactly one line).
+	ErrInvalidLine = errors.New("kv: line must not contain a newline")
 )

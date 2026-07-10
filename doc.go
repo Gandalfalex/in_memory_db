@@ -45,4 +45,14 @@
 //	}
 //	defer h.Close() // releases the handle; the Manager owns the DB
 //	h.Put(...)
+//
+// When the on-disk format must stay a plain, human/tool-readable line
+// file (e.g. JSONL) rather than kv's binary segments, use FileIndex: the
+// file holds exactly the caller's bytes, one record per line, append-only,
+// and the index is pure RAM, rebuilt on Open by one scan with a
+// caller-supplied KeyFunc (see JSONStringKey). Put appends and repoints;
+// superseded lines stay on disk. FileIndexManager pools named FileIndexes
+// with the same Acquire/Release/idle-reap behavior as Manager:
+//
+//	fi, err := kv.OpenFileIndex("/var/lib/myapp/traces.jsonl", kv.JSONStringKey("id"))
 package kv

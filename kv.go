@@ -157,15 +157,28 @@ type IterOptions struct {
 // an unprefixed iterator over millions of keys still holds all of those
 // keys in memory at once, by construction of a hash-indexed (not
 // range/sorted) store. Values are read from disk lazily, one at a time, as
-// Next() advances.
+// Next() advances. The same type serves both DB and FileIndex.
 type Iterator struct {
-	db     *DB
+	get    func(key []byte) ([]byte, error)
 	keys   [][]byte
 	pos    int
 	curKey []byte
 	curVal []byte
 	err    error
 	closed bool
+}
+
+// newIterator orders keys per opts and wires the lazy value reader.
+func newIterator(keys [][]byte, opts IterOptions, get func(key []byte) ([]byte, error)) *Iterator {
+	if opts.Sorted {
+		slices.SortFunc(keys, bytes.Compare)
+	}
+	if opts.Reverse {
+		for i, j := 0, len(keys)-1; i < j; i, j = i+1, j-1 {
+			keys[i], keys[j] = keys[j], keys[i]
+		}
+	}
+	return &Iterator{get: get, keys: keys, pos: -1}
 }
 
 // Iterator returns a new Iterator over keys matching opts.
@@ -181,15 +194,14 @@ func (db *DB) Iterator(opts IterOptions) *Iterator {
 	})
 	db.mu.RUnlock()
 
-	if opts.Sorted {
-		slices.SortFunc(keys, bytes.Compare)
-	}
-	if opts.Reverse {
-		for i, j := 0, len(keys)-1; i < j; i, j = i+1, j-1 {
-			keys[i], keys[j] = keys[j], keys[i]
+	return newIterator(keys, opts, func(key []byte) ([]byte, error) {
+		db.mu.RLock()
+		defer db.mu.RUnlock()
+		if db.closed {
+			return nil, ErrClosed
 		}
-	}
-	return &Iterator{db: db, keys: keys, pos: -1}
+		return db.getLocked(key)
+	})
 }
 
 // Next advances to the next matching key, skipping any that were deleted
@@ -201,9 +213,7 @@ func (it *Iterator) Next() bool {
 	}
 	for it.pos++; it.pos < len(it.keys); it.pos++ {
 		key := it.keys[it.pos]
-		it.db.mu.RLock()
-		val, err := it.db.getLocked(key)
-		it.db.mu.RUnlock()
+		val, err := it.get(key)
 		switch {
 		case err == nil:
 			it.curKey, it.curVal = key, val
