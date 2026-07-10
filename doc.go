@@ -23,4 +23,26 @@
 // waiting for the background compactor. Lookups of absent keys return
 // ErrNotFound; invalid keys return ErrEmptyKey or ErrKeyTooLarge. All
 // sentinel errors are errors.Is-comparable.
+//
+// To keep many rarely-touched datasets on disk without paying their RAM
+// cost permanently, use a Manager: it pools named DBs under one base
+// directory, opens each lazily on Acquire, and closes idle ones after
+// ManagerOptions.IdleTTL, freeing their index and mmap regions until the
+// next Acquire reopens them:
+//
+//	m, err := kv.NewManager(kv.ManagerOptions{
+//		BaseDir: "/var/lib/myapp/stores",
+//		IdleTTL: 5 * time.Minute,
+//	})
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//	defer m.Close()
+//
+//	h, err := m.Acquire("migration-2026-07") // opens BaseDir/migration-2026-07
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//	defer h.Close() // releases the handle; the Manager owns the DB
+//	h.Put(...)
 package kv
