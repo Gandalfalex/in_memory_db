@@ -257,14 +257,6 @@ func (h *handleRef[T]) Release() {
 	h.entry.release()
 }
 
-// Close releases the handle (it does not close the underlying resource;
-// the manager owns that). It exists so a handle satisfies the usual
-// defer-Close idiom and always returns nil.
-func (h *handleRef[T]) Close() error {
-	h.Release()
-	return nil
-}
-
 // ManagedDBStat describes one named resource its manager has seen since
 // it was created (entries are retained after an idle close, so a name
 // reappears as Open=false rather than vanishing). Used by both Manager

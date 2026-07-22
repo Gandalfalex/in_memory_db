@@ -23,23 +23,26 @@ func (JSONCodec[T]) Decode(data []byte) (T, error) {
 	return v, err
 }
 
-// Bucket is a typed convenience layer over DB's raw []byte API: keys are
-// namespaced under prefix (so multiple buckets can share one DB) and
-// values are (de)serialized through codec.
+// Bucket is a typed convenience layer over a Store's raw []byte API: keys
+// are namespaced under prefix (so multiple buckets can share one Store)
+// and values are (de)serialized through codec. It works over *DB directly
+// or over a *FileIndex wrapped in a FileIndexStore — anything satisfying
+// Store.
 type Bucket[T any] struct {
-	db     *DB
+	store  Store
 	prefix string
 	codec  Codec[T]
 }
 
-// NewBucket returns a Bucket over db, namespacing every key under prefix.
-// The prefix is prepended verbatim — no separator is inserted — so end it
-// with a delimiter (e.g. "users:"): otherwise bucket "a" with key "bc"
-// collides with bucket "ab" with key "c", and iterating bucket "user"
-// also yields keys written by a bucket whose prefix merely extends it
-// ("users").
-func NewBucket[T any](db *DB, prefix string, codec Codec[T]) *Bucket[T] {
-	return &Bucket[T]{db: db, prefix: prefix, codec: codec}
+// NewBucket returns a Bucket over store, namespacing every key under
+// prefix. The prefix is prepended verbatim — no separator is inserted —
+// so end it with a delimiter (e.g. "users:"): otherwise bucket "a" with
+// key "bc" collides with bucket "ab" with key "c", and iterating bucket
+// "user" also yields keys written by a bucket whose prefix merely extends
+// it ("users"). store is typically a *DB (satisfies Store directly) or a
+// *FileIndex wrapped via NewFileIndexStore.
+func NewBucket[T any](store Store, prefix string, codec Codec[T]) *Bucket[T] {
+	return &Bucket[T]{store: store, prefix: prefix, codec: codec}
 }
 
 func (b *Bucket[T]) fullKey(key string) []byte {
@@ -51,12 +54,12 @@ func (b *Bucket[T]) Put(key string, value T) error {
 	if err != nil {
 		return err
 	}
-	return b.db.Put(b.fullKey(key), data)
+	return b.store.Put(b.fullKey(key), data)
 }
 
 func (b *Bucket[T]) Get(key string) (T, error) {
 	var zero T
-	data, err := b.db.Get(b.fullKey(key))
+	data, err := b.store.Get(b.fullKey(key))
 	if err != nil {
 		return zero, err
 	}
@@ -64,32 +67,34 @@ func (b *Bucket[T]) Get(key string) (T, error) {
 }
 
 func (b *Bucket[T]) Delete(key string) error {
-	return b.db.Delete(b.fullKey(key))
+	return b.store.Delete(b.fullKey(key))
 }
 
 // Has reports whether key currently has a live value in this bucket.
 func (b *Bucket[T]) Has(key string) (bool, error) {
-	return b.db.Has(b.fullKey(key))
+	return b.store.Has(b.fullKey(key))
 }
 
 // BucketIterator walks a bucket's entries with the bucket prefix stripped
 // from keys and values decoded through the bucket's codec.
 type BucketIterator[T any] struct {
-	it        *Iterator
-	codec     Codec[T]
-	prefixLen int
-	key       string
-	val       T
-	err       error
+	it          *Iterator
+	codec       Codec[T]
+	decodeValue func(raw []byte) ([]byte, bool)
+	prefixLen   int
+	key         string
+	val         T
+	err         error
 }
 
 // Iterator returns a BucketIterator over this bucket's entries
 // (optionally further restricted by a sub-prefix within the bucket).
 func (b *Bucket[T]) Iterator(subPrefix string) *BucketIterator[T] {
 	return &BucketIterator[T]{
-		it:        b.db.Iterator(IterOptions{Prefix: b.fullKey(subPrefix)}),
-		codec:     b.codec,
-		prefixLen: len(b.prefix),
+		it:          b.store.Iterator(IterOptions{Prefix: b.fullKey(subPrefix)}),
+		codec:       b.codec,
+		decodeValue: b.store.DecodeValue,
+		prefixLen:   len(b.prefix),
 	}
 }
 
@@ -103,7 +108,12 @@ func (it *BucketIterator[T]) Next() bool {
 		it.err = it.it.Err()
 		return false
 	}
-	v, err := it.codec.Decode(it.it.Value())
+	raw, ok := it.decodeValue(it.it.Value())
+	if !ok {
+		it.err = fmt.Errorf("kv: no value for key %q", it.it.Key())
+		return false
+	}
+	v, err := it.codec.Decode(raw)
 	if err != nil {
 		it.err = fmt.Errorf("kv: decode value for key %q: %w", it.it.Key(), err)
 		return false

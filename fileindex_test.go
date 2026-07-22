@@ -2,6 +2,7 @@ package kv
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -27,6 +28,13 @@ func openTestFileIndex(t *testing.T, keyFunc KeyFunc) (*FileIndex, string) {
 	}
 	t.Cleanup(func() { fi.Close() })
 	return fi, path
+}
+
+func TestFileIndexPath(t *testing.T) {
+	fi, path := openTestFileIndex(t, csvKey)
+	if fi.Path() != path {
+		t.Fatalf("Path() = %q, want %q", fi.Path(), path)
+	}
 }
 
 func TestFileIndexPutGetRoundtrip(t *testing.T) {
@@ -323,14 +331,14 @@ func TestJSONStringKey(t *testing.T) {
 		{`{"nested":{"id":"inner"},"id":"outer"}`, "outer", true},
 		{`{"arr":[{"id":"x"},2,[3]],"id":"after-arr"}`, "after-arr", true},
 		{`{"id":"a","extra":"ignored"}`, "a", true},
-		{`{"v":1}`, "", false},          // field missing
-		{`{"id":42}`, "", false},        // non-string value
-		{`{"id":""}`, "", false},        // empty key useless
-		{`{"id":"a"`, "", false},        // torn: invalid JSON
-		{`["id","a"]`, "", false},       // not an object
-		{`"id"`, "", false},             // scalar
-		{`not json at all`, "", false},  // garbage
-		{``, "", false},                 // blank
+		{`{"v":1}`, "", false},              // field missing
+		{`{"id":42}`, "", false},            // non-string value
+		{`{"id":""}`, "", false},            // empty key useless
+		{`{"id":"a"`, "", false},            // torn: invalid JSON
+		{`["id","a"]`, "", false},           // not an object
+		{`"id"`, "", false},                 // scalar
+		{`not json at all`, "", false},      // garbage
+		{``, "", false},                     // blank
 		{`{"outer":{"id":"x"}}`, "", false}, // only nested, not top-level
 	}
 	for _, c := range cases {
@@ -339,6 +347,41 @@ func TestJSONStringKey(t *testing.T) {
 			t.Errorf("JSONStringKey(%q) = %q, %v; want %q, %v", c.line, key, ok, c.key, c.ok)
 		}
 	}
+}
+
+// FuzzJSONStringKey targets JSONStringKey's hand-rolled token scanner
+// (skipJSONValue in particular, walking nested objects/arrays by
+// tracking delimiter depth): the table above covers the cases we thought
+// of, but a bespoke parser over arbitrary bytes — used on every line of
+// a file this package explicitly doesn't control the contents of — is
+// exactly where an unanticipated shape (deeply nested, a torn tail at an
+// unlucky byte, unicode edge cases) could panic instead of just
+// returning ok=false.
+func FuzzJSONStringKey(f *testing.F) {
+	f.Add([]byte(`{"id":"a"}`))
+	f.Add([]byte(`{"id":42}`))
+	f.Add([]byte(`{"nested":{"id":"inner"},"id":"outer"}`))
+	f.Add([]byte(`{"arr":[{"id":"x"},2,[3]],"id":"after-arr"}`))
+	f.Add([]byte(`{"id":`))
+	f.Add([]byte(`{"id":"a"`))
+	f.Add([]byte(`not json at all`))
+	f.Add([]byte(`{{{{{{{{`))
+	f.Add([]byte(`[[[[[[[[`))
+	f.Add([]byte(""))
+
+	keyFunc := JSONStringKey("id")
+	f.Fuzz(func(t *testing.T, line []byte) {
+		key, ok := keyFunc(line)
+		if !ok {
+			return
+		}
+		if len(key) == 0 {
+			t.Fatalf("ok=true but empty key for line %q", line)
+		}
+		if !json.Valid(line) {
+			t.Fatalf("ok=true but line %q is not valid JSON", line)
+		}
+	})
 }
 
 func TestFileIndexReopenAfterSyncSurvives(t *testing.T) {

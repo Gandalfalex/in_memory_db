@@ -1,8 +1,8 @@
-// Package kv is an embedded, single-process key-value store: an
-// append-only, memory-mapped segment log on disk plus a compact,
-// pointer-free in-memory index. It is built for hosts with very little
-// RAM and a single CPU core while still tracking millions of small
-// records; see the README for the full design rationale.
+// Package kv is embedded storage for single-process hosts with very
+// little RAM and a single CPU core: not one data structure but a family
+// of three, DB, FileIndex, and SortedIndex, each shaped for a different
+// access pattern; see the README for the full design rationale and a
+// side-by-side comparison.
 //
 // Open a DB with the recommended defaults:
 //
@@ -13,9 +13,9 @@
 //	defer db.Close()
 //
 // The core API is raw bytes: Put, Get, Has, Delete, and prefix iteration
-// via All (range-over-func) or Iterator. For typed values, wrap the DB in
-// a Bucket, which namespaces keys under a prefix and (de)serializes
-// values through a Codec.
+// via All (range-over-func) or Iterator. For typed values, wrap a Store
+// (DB satisfies it directly) in a Bucket, which namespaces keys under a
+// prefix and (de)serializes values through a Codec.
 //
 // Writes are atomic per key; there are no multi-key transactions. With
 // Options.SyncOnWrite off (the default) durability is buffered — call
@@ -55,4 +55,25 @@
 // with the same Acquire/Release/idle-reap behavior as Manager:
 //
 //	fi, err := kv.OpenFileIndex("/var/lib/myapp/traces.jsonl", kv.JSONStringKey("id"))
+//
+// FileIndexStore adapts a FileIndex to Store (via a LineCodec bridging
+// its one-line writes onto Store's explicit Put(key, value)), so Bucket
+// works over a FileIndex the same way it works over a DB.
+//
+// When the dataset is too large to index in RAM at all (tens of millions
+// of lines and up) but is only queried in rare bursts — sort, filter, or
+// range over the whole thing, otherwise idle — use SortedIndex instead:
+// BuildSortedIndex writes a sorted directory via external merge sort (RAM
+// bounded by SortedIndexOptions.ChunkEntries, never by the source size),
+// and EnsureFresh reopens that cache — rebuilding only when the sources
+// have actually changed, and folding in a purely-appended new source
+// (see sortedindex_refresh.go) without re-scanning the rest — which
+// SortedIndexManager pairs with the same idle-TTL reaping as Manager and
+// FileIndexManager.
+//
+// DB, FileIndex, and SortedIndex all satisfy Reader (Get, Has), the plug
+// point for code written against "whichever store the caller has". DB
+// and FileIndex (via FileIndexStore) further satisfy Store, adding Put,
+// Delete, and Iterator — SortedIndex never does; it is read-only by
+// design.
 package kv
