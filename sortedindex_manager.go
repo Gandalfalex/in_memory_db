@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/Gandalfalex/in_memory_db/internal/pool"
 )
 
 // SortedIndexManagerOptions configures a SortedIndexManager.
@@ -41,7 +43,8 @@ type SortedIndexManagerOptions struct {
 // SortedIndexManager pools named SortedIndex instances, each built (or
 // reopened) on demand from a caller-supplied, caller-ordered list of
 // source files, with the same lazy-open/refcount/idle-reap behavior as
-// Manager and FileIndexManager (all three share pool.go's machinery).
+// Manager and FileIndexManager (all three share internal/pool's
+// machinery).
 //
 // Unlike Manager/FileIndexManager, where a name maps to one fixed file
 // under BaseDir, a SortedIndex is built from a set of files the caller
@@ -49,7 +52,7 @@ type SortedIndexManagerOptions struct {
 // Acquire takes that list explicitly every call. CacheDir only holds the
 // built sidecars, not the source data.
 type SortedIndexManager struct {
-	p         *pool[*SortedIndex]
+	p         *pool.Pool[*SortedIndex]
 	keyFunc   KeyFunc
 	buildOpts SortedIndexOptions
 
@@ -85,7 +88,7 @@ func NewSortedIndexManager(opts SortedIndexManagerOptions) (*SortedIndexManager,
 			return nil, fmt.Errorf("kv: create cache dir for %q: %w", name, err)
 		}
 		sidxPath := filepath.Join(path, "index.sidx")
-		// pool.go's openRes has no ctx parameter (Manager/FileIndexManager
+		// internal/pool's openRes has no ctx parameter (Manager/FileIndexManager
 		// don't need one; DB.Open/OpenFileIndex are fast), so a build
 		// triggered via Acquire can't be cancelled the way a direct
 		// EnsureFresh/BuildSortedIndex call can. Call BuildSortedIndex or
@@ -99,7 +102,7 @@ func NewSortedIndexManager(opts SortedIndexManagerOptions) (*SortedIndexManager,
 		return si, nil
 	}
 
-	p, err := newPool("sorted index", opts.CacheDir, opts.IdleTTL, opts.SweepInterval, open)
+	p, err := pool.New("sorted index", opts.CacheDir, opts.IdleTTL, opts.SweepInterval, open)
 	if err != nil {
 		return nil, err
 	}
@@ -128,11 +131,11 @@ func (m *SortedIndexManager) Acquire(name string, sourcePaths []string) (*Sorted
 	m.sources[name] = sourcePaths
 	m.mu.Unlock()
 
-	si, e, err := m.p.acquire(name)
+	si, e, err := m.p.Acquire(name)
 	if err != nil {
 		return nil, err
 	}
-	return &SortedIndexHandle{SortedIndex: si, handleRef: handleRef[*SortedIndex]{entry: e}}, nil
+	return &SortedIndexHandle{SortedIndex: si, HandleRef: pool.HandleRef[*SortedIndex]{Entry: e}}, nil
 }
 
 // SortedIndexHandle is a refcounted reference to a managed SortedIndex.
@@ -141,7 +144,7 @@ func (m *SortedIndexManager) Acquire(name string, sourcePaths []string) (*Sorted
 // from under other handle holders.
 type SortedIndexHandle struct {
 	*SortedIndex
-	handleRef[*SortedIndex]
+	pool.HandleRef[*SortedIndex]
 }
 
 // Close releases the handle (it does not close the underlying
@@ -153,12 +156,12 @@ func (h *SortedIndexHandle) Close() error {
 
 // Close closes every open SortedIndex and rejects further Acquires.
 // A second call returns ErrManagerClosed.
-func (m *SortedIndexManager) Close() error { return m.p.close() }
+func (m *SortedIndexManager) Close() error { return m.p.Close() }
 
 // Stats returns a snapshot of every known dataset, sorted by name.
 // Cheap: no I/O.
-func (m *SortedIndexManager) Stats() []ManagedDBStat { return m.p.stats() }
+func (m *SortedIndexManager) Stats() []ManagedDBStat { return m.p.Stats() }
 
 // sweep is exposed for tests; the reaper goroutine calls the pool's sweep
 // directly.
-func (m *SortedIndexManager) sweep(now time.Time) { m.p.sweep(now) }
+func (m *SortedIndexManager) sweep(now time.Time) { m.p.Sweep(now) }

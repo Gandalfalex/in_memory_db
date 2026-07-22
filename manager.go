@@ -3,7 +3,15 @@ package kv
 import (
 	"fmt"
 	"time"
+
+	"github.com/Gandalfalex/in_memory_db/internal/pool"
 )
+
+// ManagedDBStat describes one named resource its manager has seen since
+// it was created (entries are retained after an idle close, so a name
+// reappears as Open=false rather than vanishing). Used by Manager,
+// FileIndexManager, and SortedIndexManager.
+type ManagedDBStat = pool.Stat
 
 // ManagerOptions configures a Manager.
 type ManagerOptions struct {
@@ -34,7 +42,7 @@ type ManagerOptions struct {
 // rarely: on-disk state is permanent, RAM is paid only while a DB is in
 // active use.
 type Manager struct {
-	p *pool[*DB]
+	p *pool.Pool[*DB]
 }
 
 // NewManager creates the base directory if needed and starts the idle
@@ -56,7 +64,7 @@ func NewManager(opts ManagerOptions) (*Manager, error) {
 		}
 		return db, nil
 	}
-	p, err := newPool("db", opts.BaseDir, opts.IdleTTL, opts.SweepInterval, open)
+	p, err := pool.New("db", opts.BaseDir, opts.IdleTTL, opts.SweepInterval, open)
 	if err != nil {
 		return nil, err
 	}
@@ -68,11 +76,11 @@ func NewManager(opts ManagerOptions) (*Manager, error) {
 // Handle.Close); the DB stays open — exempt from idle reaping — while any
 // handle is outstanding.
 func (m *Manager) Acquire(name string) (*Handle, error) {
-	db, e, err := m.p.acquire(name)
+	db, e, err := m.p.Acquire(name)
 	if err != nil {
 		return nil, err
 	}
-	return &Handle{DB: db, handleRef: handleRef[*DB]{entry: e}}, nil
+	return &Handle{DB: db, HandleRef: pool.HandleRef[*DB]{Entry: e}}, nil
 }
 
 // Handle is a refcounted reference to a managed DB. The embedded *DB
@@ -81,7 +89,7 @@ func (m *Manager) Acquire(name string) (*Handle, error) {
 // DB out from under other handle holders.
 type Handle struct {
 	*DB
-	handleRef[*DB]
+	pool.HandleRef[*DB]
 }
 
 // Close releases the handle (it does not close the underlying DB; the
@@ -95,12 +103,12 @@ func (h *Handle) Close() error {
 // Close closes every open DB and rejects further Acquires. Outstanding
 // handles are invalidated: their operations return ErrClosed. A second
 // call returns ErrManagerClosed.
-func (m *Manager) Close() error { return m.p.close() }
+func (m *Manager) Close() error { return m.p.Close() }
 
 // Stats returns a snapshot of every known DB, sorted by name. Cheap: no
 // I/O.
-func (m *Manager) Stats() []ManagedDBStat { return m.p.stats() }
+func (m *Manager) Stats() []ManagedDBStat { return m.p.Stats() }
 
 // sweep is exposed for tests; the reaper goroutine calls the pool's sweep
 // directly.
-func (m *Manager) sweep(now time.Time) { m.p.sweep(now) }
+func (m *Manager) sweep(now time.Time) { m.p.Sweep(now) }

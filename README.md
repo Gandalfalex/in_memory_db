@@ -23,6 +23,40 @@ code generic over "whichever store the caller has". `DB` and `FileIndex`
 lets `Bucket`'s typed convenience layer wrap either one. See `example/`
 for a complete runnable tour of all three.
 
+## Package layout
+
+The public API is one package (`import kv "github.com/.../in_memory_db"`)
+— but the three tiers' actual implementations live in separate,
+unimportable `internal/` packages, each only visible to the other packages
+in this module:
+
+- `internal/kvtypes` — the shared vocabulary all three tiers depend on:
+  sentinel errors, `KeyFunc`, `Iterator`/`IterOptions`, and the fixed-width
+  binary I/O helpers every on-disk format uses. No dependencies of its own.
+- `internal/bitcask` — the `DB` engine.
+- `internal/fileindex` — the `FileIndex` engine.
+- `internal/sortedindex` — the `SortedIndex` engine, including its build
+  (external merge sort), incremental refresh, and Bloom filter machinery.
+- `internal/pool` — the generic idle-TTL pool behind all three managers.
+- `internal/mmapfile` — the mmap wrapper `internal/bitcask` uses.
+
+The root package is a thin façade over these: type aliases
+(`type DB = bitcask.DB`, so `kv.DB` *is* `bitcask.DB`, not a wrapper with
+its own method set) plus one-line constructor wrappers, `Bucket`/`Codec`
+(genuinely cross-tier, since it's written against `Store` rather than any
+one engine), `FileIndexStore` (the `FileIndex`-to-`Store` adapter), and
+the three pooled managers (`Manager`, `FileIndexManager`,
+`SortedIndexManager` — orchestration that ties one engine package to
+`internal/pool`, so neither needs to know the other exists).
+
+The point: nothing outside this module can import `internal/bitcask` and
+reach into, say, its hash index or segment format directly — even code
+elsewhere in this module can't reach across tiers except through the
+shared interfaces (`Reader`, `Store`, `KeyFunc`) `internal/kvtypes`
+defines. Splitting `bloom.go` from `sortedindex.go`'s internals, or
+`Bucket` from `DB`'s, used to be enforced only by convention (same
+package, nothing stopped a shortcut); now the compiler enforces it.
+
 ## DB
 
 Bitcask-style log-structured hash table for a moderate dataset under

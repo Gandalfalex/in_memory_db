@@ -3,6 +3,8 @@ package kv
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -273,7 +275,21 @@ func TestManagerDBOptionsDirIsForced(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer h.Close()
-	if got := h.DB.opts.Dir; got == rogue {
+	if err := h.Put([]byte("k"), []byte("v")); err != nil {
+		t.Fatal(err)
+	}
+	// Observable proof instead of reaching into DB's unexported Options:
+	// segment files must land under the assigned directory, not the
+	// callback's rogue one.
+	assigned, err := os.ReadDir(filepath.Join(base, "a"))
+	if err != nil || len(assigned) == 0 {
+		t.Fatalf("expected segment files under the assigned dir: entries=%v err=%v", assigned, err)
+	}
+	rogueEntries, err := os.ReadDir(rogue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rogueEntries) != 0 {
 		t.Fatal("DBOptions callback overrode the assigned directory")
 	}
 }
@@ -282,12 +298,12 @@ func TestManagerConcurrentAcquireRelease(t *testing.T) {
 	m := testManager(t, time.Minute)
 
 	var wg sync.WaitGroup
-	for g := 0; g < 8; g++ {
+	for g := range 8 {
 		wg.Add(1)
 		go func(g int) {
 			defer wg.Done()
 			name := fmt.Sprintf("db-%d", g%3)
-			for i := 0; i < 50; i++ {
+			for i := range 50 {
 				h, err := m.Acquire(name)
 				if err != nil {
 					t.Error(err)
@@ -309,12 +325,12 @@ func TestManagerConcurrentAcquireRelease(t *testing.T) {
 	wg.Wait()
 
 	// Everything written must still be readable after all the churn.
-	for g := 0; g < 8; g++ {
+	for g := range 8 {
 		h, err := m.Acquire(fmt.Sprintf("db-%d", g%3))
 		if err != nil {
 			t.Fatal(err)
 		}
-		for i := 0; i < 50; i++ {
+		for i := range 50 {
 			key := fmt.Appendf(nil, "g%d-i%d", g, i)
 			if _, err := h.Get(key); err != nil {
 				t.Fatalf("Get(%s): %v", key, err)

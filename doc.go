@@ -67,13 +67,23 @@
 // bounded by SortedIndexOptions.ChunkEntries, never by the source size),
 // and EnsureFresh reopens that cache — rebuilding only when the sources
 // have actually changed, and folding in a purely-appended new source
-// (see sortedindex_refresh.go) without re-scanning the rest — which
-// SortedIndexManager pairs with the same idle-TTL reaping as Manager and
-// FileIndexManager.
+// (see internal/sortedindex's sortedindex_refresh.go) without re-scanning
+// the rest — which SortedIndexManager pairs with the same idle-TTL
+// reaping as Manager and FileIndexManager.
 //
 // DB, FileIndex, and SortedIndex all satisfy Reader (Get, Has), the plug
 // point for code written against "whichever store the caller has". DB
 // and FileIndex (via FileIndexStore) further satisfy Store, adding Put,
 // Delete, and Iterator — SortedIndex never does; it is read-only by
 // design.
+//
+// This package is a thin façade (type aliases and constructor wrappers)
+// over three internal engine packages — internal/bitcask,
+// internal/fileindex, internal/sortedindex — plus internal/pool (the
+// generic machinery behind the three managers) and internal/kvtypes (the
+// vocabulary — KeyFunc, Iterator, sentinel errors — they all share). See
+// the README's "Package layout" section for why: it's what makes DB's
+// index format, FileIndex's line format, and SortedIndex's merge
+// machinery invisible to each other, not just to callers outside this
+// module.
 package kv

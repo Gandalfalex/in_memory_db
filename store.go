@@ -38,10 +38,6 @@ type Store interface {
 	DecodeValue(raw []byte) (value []byte, ok bool)
 }
 
-// DecodeValue satisfies Store: DB's Get/Iterator already yield bare
-// values with no envelope, so this is the identity.
-func (db *DB) DecodeValue(raw []byte) ([]byte, bool) { return raw, true }
-
 var (
 	_ Reader = (*DB)(nil)
 	_ Reader = (*FileIndex)(nil)

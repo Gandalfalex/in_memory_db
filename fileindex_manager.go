@@ -3,6 +3,8 @@ package kv
 import (
 	"fmt"
 	"time"
+
+	"github.com/Gandalfalex/in_memory_db/internal/pool"
 )
 
 // FileIndexManagerOptions configures a FileIndexManager.
@@ -29,7 +31,7 @@ type FileIndexManagerOptions struct {
 // directory, with the same lazy-open/refcount/idle-reap behavior as
 // Manager (both share one resource-agnostic pool underneath).
 type FileIndexManager struct {
-	p *pool[*FileIndex]
+	p *pool.Pool[*FileIndex]
 }
 
 // NewFileIndexManager creates the base directory if needed and starts the
@@ -48,7 +50,7 @@ func NewFileIndexManager(opts FileIndexManagerOptions) (*FileIndexManager, error
 		}
 		return fi, nil
 	}
-	p, err := newPool("file index", opts.BaseDir, opts.IdleTTL, opts.SweepInterval, open)
+	p, err := pool.New("file index", opts.BaseDir, opts.IdleTTL, opts.SweepInterval, open)
 	if err != nil {
 		return nil, err
 	}
@@ -60,11 +62,11 @@ func NewFileIndexManager(opts FileIndexManagerOptions) (*FileIndexManager, error
 // Close); the index stays open — exempt from idle reaping — while any
 // handle is outstanding.
 func (m *FileIndexManager) Acquire(name string) (*FileIndexHandle, error) {
-	fi, e, err := m.p.acquire(name)
+	fi, e, err := m.p.Acquire(name)
 	if err != nil {
 		return nil, err
 	}
-	return &FileIndexHandle{FileIndex: fi, handleRef: handleRef[*FileIndex]{entry: e}}, nil
+	return &FileIndexHandle{FileIndex: fi, HandleRef: pool.HandleRef[*FileIndex]{Entry: e}}, nil
 }
 
 // FileIndexHandle is a refcounted reference to a managed FileIndex. The
@@ -73,7 +75,7 @@ func (m *FileIndexManager) Acquire(name string) (*FileIndexHandle, error) {
 // under other handle holders.
 type FileIndexHandle struct {
 	*FileIndex
-	handleRef[*FileIndex]
+	pool.HandleRef[*FileIndex]
 }
 
 // Close releases the handle (it does not close the underlying FileIndex;
@@ -86,12 +88,12 @@ func (h *FileIndexHandle) Close() error {
 // Close closes every open FileIndex and rejects further Acquires.
 // Outstanding handles are invalidated: their operations return ErrClosed.
 // A second call returns ErrManagerClosed.
-func (m *FileIndexManager) Close() error { return m.p.close() }
+func (m *FileIndexManager) Close() error { return m.p.Close() }
 
 // Stats returns a snapshot of every known FileIndex, sorted by name.
 // Cheap: no I/O.
-func (m *FileIndexManager) Stats() []ManagedDBStat { return m.p.stats() }
+func (m *FileIndexManager) Stats() []ManagedDBStat { return m.p.Stats() }
 
 // sweep is exposed for tests; the reaper goroutine calls the pool's sweep
 // directly.
-func (m *FileIndexManager) sweep(now time.Time) { m.p.sweep(now) }
+func (m *FileIndexManager) sweep(now time.Time) { m.p.Sweep(now) }
